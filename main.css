@@ -1,5 +1,26 @@
+@font-face {
+    font-family: 'Minecraft';
+    src: url('https://fonts.cdnfonts.com/s/8456/Minecraftia-Regular.woff') format('woff');
+    font-display: swap;
+}
+
 body {
     margin: 0;
+    overflow: hidden;
+}
+
+#coords {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 2;
+    color: white;
+    font-family: 'Minecraft', monospace;
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.4;
+    text-shadow: 2px 2px 0 #000;
+    pointer-events: none;
 }
 
 #crosshair {
@@ -12,6 +33,7 @@ body {
     transform: translate(-50%, -50%);
     mix-blend-mode: difference;
     pointer-events: none;
+    z-index: 2;
     clip-path: polygon(
         40% 0%, 60% 0%, 60% 40%, 100% 40%, 100% 60%, 60% 60%,
         60% 100%, 40% 100%, 40% 60%, 0% 60%, 0% 40%, 40% 40%
