@@ -46,17 +46,26 @@ function createGrassBlock(x, z, chunkKey, localX, localZ) {
     return block;
 }
 
-const worldBorder = 3_000_000;
-const halfWorldBorder = worldBorder / 2;
+const worldBorder = 3000000;
+const halfWorldBorder = worldBorder/2;
 const renderDistance = 16;
-const chunkSize = 16;
+const chunkSize = 4;
 const player_height = 2;
-const standingCameraY = player_height * 3 / 4;
+const standingCameraY = player_height*0.81;
+const crouchingCameraY = player_height*0.635;
 const walkSpeedBlocksPerSecond = 4.317;
 const sneakSpeedBlocksPerSecond = 1.295;
-const verticalMoveSpeedBlocksPerSecond = 4.317;
+const sprintSpeedBlocksPerSecond = 5.612;
 const blockBreakRange = 4.5;
-const renderDistanceInChunks = Math.ceil(renderDistance / chunkSize);
+const minecraftTicksPerSecond = 20;
+const tickDurationSeconds = 1 / minecraftTicksPerSecond;
+const sprintTapWindowTicks = 7;
+const sprintTapWindowMilliseconds = sprintTapWindowTicks * tickDurationSeconds*1000;
+const jumpVelocityPerTick = 0.42;
+const gravityPerTick = 0.08;
+const verticalDrag = 0.98;
+const groundBaseY = 0;
+const renderDistanceInChunks = Math.ceil(renderDistance/chunkSize);
 const loadedChunks = new Map();
 const brokenBlocksByChunk = new Map();
 
@@ -208,16 +217,40 @@ updateCoordinateDisplay();
 
 const pressedKeys = {};
 let isBreakingBlock = false;
+let isCrouching = false;
 let previousChunkX = getChunkCoordinate(camera.position.x);
 let previousChunkZ = getChunkCoordinate(camera.position.z);
 let lastFrameTime = 0;
+let physicsAccumulator = 0;
+let playerBaseY = groundBaseY;
+let verticalVelocity = 0;
+let isGrounded = true;
+let jumpQueued = false;
+let isSprinting = false;
+let lastForwardTapTime = -Infinity;
 
 document.addEventListener('keydown', (e) => {
     pressedKeys[e.code] = true;
+
+    if (e.code === 'Space' && !e.repeat) {
+        jumpQueued = true;
+    }
+
+    if (e.code === 'KeyW' && !e.repeat) {
+        if (e.timeStamp - lastForwardTapTime <= sprintTapWindowMilliseconds) {
+            isSprinting = true;
+        }
+
+        lastForwardTapTime = e.timeStamp;
+    }
 });
 
 document.addEventListener('keyup', (e) => {
     pressedKeys[e.code] = false;
+
+    if (e.code === 'KeyW') {
+        isSprinting = false;
+    }
 });
 
 document.addEventListener('mousedown', (e) => {
@@ -238,6 +271,8 @@ window.addEventListener('blur', () => {
         pressedKeys[code] = false;
     });
     isBreakingBlock = false;
+    jumpQueued = false;
+    isSprinting = false;
 });
 
 window.addEventListener('resize', () => {
@@ -250,24 +285,50 @@ function animate(time) {
     const deltaSeconds = lastFrameTime === 0 ? 0 : (time - lastFrameTime) / 1000;
     lastFrameTime = time;
     const isSneaking = pressedKeys['ShiftLeft'] || pressedKeys['ShiftRight'];
-    const horizontalMoveSpeed = (isSneaking ? sneakSpeedBlocksPerSecond : walkSpeedBlocksPerSecond) * deltaSeconds;
-    const verticalMoveSpeed = verticalMoveSpeedBlocksPerSecond * deltaSeconds;
+    const isMovingForward = pressedKeys['KeyW'] && !pressedKeys['KeyS'];
+    const isSprintActive = isSprinting && isMovingForward && !isSneaking;
+    const horizontalMoveSpeed = (
+        isSneaking
+            ? sneakSpeedBlocksPerSecond
+            : isSprintActive
+                ? sprintSpeedBlocksPerSecond
+                : walkSpeedBlocksPerSecond
+    ) * deltaSeconds;
+    physicsAccumulator += deltaSeconds;
+    const targetEyeHeight = isSneaking ? crouchingCameraY : standingCameraY;
+
+    while (physicsAccumulator >= tickDurationSeconds) {
+        if (jumpQueued && isGrounded) {
+            verticalVelocity = jumpVelocityPerTick;
+            isGrounded = false;
+        }
+
+        jumpQueued = false;
+
+        // Minecraft applies vertical movement before horizontal movement.
+        playerBaseY += verticalVelocity;
+        verticalVelocity = (verticalVelocity - gravityPerTick) * verticalDrag;
+
+        if (playerBaseY <= groundBaseY) {
+            playerBaseY = groundBaseY;
+            verticalVelocity = 0;
+            isGrounded = true;
+        }
+
+        physicsAccumulator -= tickDurationSeconds;
+    }
 
     if (pressedKeys['KeyW']) controls.moveForward(horizontalMoveSpeed);
     if (pressedKeys['KeyS']) controls.moveForward(-horizontalMoveSpeed);
     if (pressedKeys['KeyD']) controls.moveRight(horizontalMoveSpeed);
     if (pressedKeys['KeyA']) controls.moveRight(-horizontalMoveSpeed);
 
-    if (pressedKeys['Space']) camera.position.y += verticalMoveSpeed;
-
-    const wantsToMoveDown = isSneaking;
-    if (wantsToMoveDown && camera.position.y > standingCameraY) {
-        camera.position.y -= verticalMoveSpeed;
+    if (!isMovingForward || isSneaking) {
+        isSprinting = false;
     }
 
-    if (camera.position.y < standingCameraY) {
-        camera.position.y = standingCameraY;
-    }
+    isCrouching = isSneaking;
+    camera.position.y = playerBaseY + targetEyeHeight;
 
     const currentChunkX = getChunkCoordinate(camera.position.x);
     const currentChunkZ = getChunkCoordinate(camera.position.z);
